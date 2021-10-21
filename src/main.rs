@@ -97,12 +97,12 @@ fn main() {
 }
 
 fn setup(mut commands: Commands) {
-    const SIDES: u8 = 6;
+    const SIDES: u8 = 5;
 
     let shape = shapes::RegularPolygon {
         sides: SIDES as usize,
         feature: shapes::RegularPolygonFeature::Radius(200.0),
-        ..shapes::RegularPolygon::default()
+        ..Default::default()
     };
 
     commands.spawn_bundle(OrthographicCameraBundle::new_2d());
