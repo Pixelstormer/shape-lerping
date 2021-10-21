@@ -68,29 +68,30 @@ struct LerpingShape {
 // Event for when all points of a LerpingShape are within the margin-of-error of the target path
 struct LerpFinished(Entity);
 
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug, SystemLabel)]
+enum System {
+    ChangeSides,
+    UpdateLerpTarget,
+    LerpShape,
+}
+
 fn main() {
     App::new()
         .insert_resource(Msaa { samples: 8 })
         .add_plugins(DefaultPlugins)
         .add_plugin(ShapePlugin)
-        .add_startup_system(setup.system())
+        .add_startup_system(setup)
         .add_event::<LerpFinished>()
-        .add_system(
-            change_sides::<RangeInclusive<u8>>
-                .system()
-                .label("change_sides"),
-        )
+        .add_system(change_sides::<RangeInclusive<u8>>.label(System::ChangeSides))
         .add_system(
             update_lerp_target::<RangeInclusive<u8>>
-                .system()
-                .label("update_lerp_target")
-                .after("change_sides"),
+                .label(System::UpdateLerpTarget)
+                .after(System::ChangeSides),
         )
         .add_system(
             lerp_shape
-                .system()
-                .label("lerp_shape")
-                .after("update_lerp_target"),
+                .label(System::LerpShape)
+                .after(System::UpdateLerpTarget),
         )
         .run();
 }
