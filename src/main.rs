@@ -3,6 +3,7 @@ use bevy_prototype_lyon::entity::Path as PathComponent;
 use bevy_prototype_lyon::prelude::*;
 use lerp::Lerp;
 use std::{
+    cmp::Ordering,
     iter::{self, FromIterator},
     ops::{Add, RangeBounds, RangeInclusive, Sub},
 };
@@ -177,23 +178,17 @@ trait Lerpable<T = Self> {
 impl Lerpable for Path {
     type Output = Self;
     fn lerp(&self, target: &Self, t: f32, margin_of_error: f32) -> (Self, LerpResult) {
-        let self_count = self.iter().count();
-        let target_count = target.iter().count();
-
-        if self_count == target_count {
-            path_lerping::lerp_same_sides(self, target, t, margin_of_error)
-        } else if self_count > target_count {
-            path_lerping::lerp_less_sides(self, target, t, margin_of_error)
-        } else {
-            // self_count < target_count
-            path_lerping::lerp_greater_sides(self, target, t, margin_of_error)
+        match self.iter().count().cmp(&target.iter().count()) {
+            Ordering::Equal => path_lerping::lerp_equal_sides(self, target, t, margin_of_error),
+            Ordering::Less => path_lerping::lerp_less_sides(self, target, t, margin_of_error),
+            Ordering::Greater => path_lerping::lerp_greater_sides(self, target, t, margin_of_error),
         }
     }
 }
 
 mod path_lerping {
     use super::*;
-    pub fn lerp_same_sides(
+    pub fn lerp_equal_sides(
         from: &Path,
         to: &Path,
         t: f32,
@@ -312,7 +307,7 @@ mod path_lerping {
         (builder.build(), all_within_margin_of_error)
     }
 
-    pub fn lerp_greater_sides(
+    pub fn lerp_less_sides(
         from: &Path,
         to: &Path,
         t: f32,
@@ -339,13 +334,13 @@ mod path_lerping {
 
             let mut builder = Builder::with_capacity(to_count * 2 - 1, to_count);
             builder.concatenate(&[Path::from_iter(parts).as_slice()]);
-            lerp_same_sides(&builder.build(), to, t, margin_of_error)
+            lerp_equal_sides(&builder.build(), to, t, margin_of_error)
         } else {
             unreachable!()
         }
     }
 
-    pub fn lerp_less_sides(
+    pub fn lerp_greater_sides(
         from: &Path,
         to: &Path,
         t: f32,
@@ -367,7 +362,7 @@ mod path_lerping {
         let mut builder = Builder::with_capacity(from_count * 2 - 1, from_count);
         builder.concatenate(&[Path::from_iter(parts).as_slice()]);
 
-        let (mut lerped, result) = lerp_same_sides(from, &builder.build(), t, margin_of_error);
+        let (mut lerped, result) = lerp_equal_sides(from, &builder.build(), t, margin_of_error);
         if let LerpResult::WithinMarginOfError = result {
             let remove_index = from_count / 2;
 
