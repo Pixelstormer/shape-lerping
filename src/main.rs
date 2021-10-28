@@ -1,11 +1,11 @@
 use bevy::prelude::*;
 use bevy_prototype_lyon::entity::Path as PathComponent;
 use bevy_prototype_lyon::prelude::*;
-use lerp::Lerp;
+use lerp::{num_traits::Float, Lerp};
 use std::{
     cmp::Ordering,
     iter::{self, FromIterator},
-    ops::{Add, RangeBounds, RangeInclusive, Sub},
+    ops::{Add, Mul, RangeBounds, RangeInclusive, Sub},
 };
 use tess::{
     geom::euclid::default::Point2D,
@@ -157,60 +157,71 @@ fn lerp_shape(
     mut query: Query<(Entity, &mut PathComponent, &LerpingShape)>,
 ) {
     for (entity, mut from, to) in query.iter_mut() {
-        let (new_path, result) = from.0.lerp(&to.target, to.lerp_t, to.margin_of_error);
+        let (new_path, is_within_margin_of_error) =
+            from.0.lerped(&to.target, to.lerp_t, to.margin_of_error);
         from.0 = new_path;
-        if let LerpResult::WithinMarginOfError = result {
+        if is_within_margin_of_error {
             lerp_events.send(LerpFinished(entity));
         }
     }
 }
 
-pub enum LerpResult {
-    OutsideMarginOfError,
-    WithinMarginOfError,
+trait WithinMarginOfError<T, M> {
+    fn is_within_margin_of_error(&self, target: &T, margin_of_error: &M) -> bool;
 }
 
-trait Lerpable<T = Self> {
-    type Output;
-    fn lerp(&self, target: &T, t: f32, margin_of_error: f32) -> (Self::Output, LerpResult);
-}
-
-impl Lerpable for Path {
-    type Output = Self;
-    fn lerp(&self, target: &Self, t: f32, margin_of_error: f32) -> (Self, LerpResult) {
-        match self.iter().count().cmp(&target.iter().count()) {
-            Ordering::Equal => path_lerping::lerp_equal_sides(self, target, t, margin_of_error),
-            Ordering::Less => path_lerping::lerp_less_sides(self, target, t, margin_of_error),
-            Ordering::Greater => path_lerping::lerp_greater_sides(self, target, t, margin_of_error),
-        }
+impl<S, T, M: PartialOrd<S> + PartialOrd<T>> WithinMarginOfError<T, M> for S {
+    fn is_within_margin_of_error(&self, target: &T, margin_of_error: &M) -> bool {
+        margin_of_error.partial_cmp(self) == margin_of_error.partial_cmp(target)
     }
 }
 
+trait Lerpable<T = f32, M = f32>: Lerp<T> {
+    fn lerped(&self, target: &Self, t: &T, margin_of_error: &M) -> (bool, Self);
+}
+
+impl<S: WithinMarginOfError<S, M> + Add<Output = S> + Mul<T, Output = S>, T: Float, M>
+    Lerpable<T, M> for S
+{
+    fn lerped(&self, target: &Self, t: &T, margin_of_error: &M) -> (bool, Self) {
+        let result = self.lerp(*target, *t);
+        (
+            result.is_within_margin_of_error(target, margin_of_error),
+            result,
+        )
+    }
+}
+
+//impl Lerpable for Path {
+//    fn lerped(&self, target: &Self, t: f32, margin_of_error: f32) -> (Self, bool) {
+//        match self.iter().count().cmp(&target.iter().count()) {
+//            Ordering::Equal => path_lerping::lerp_equal_sides(self, target, t, margin_of_error),
+//            Ordering::Less => path_lerping::lerp_less_sides(self, target, t, margin_of_error),
+//            Ordering::Greater => path_lerping::lerp_greater_sides(self, target, t, margin_of_error),
+//        }
+//    }
+//}
+
 mod path_lerping {
     use super::*;
-    pub fn lerp_equal_sides(
-        from: &Path,
-        to: &Path,
-        t: f32,
-        margin_of_error: f32,
-    ) -> (Path, LerpResult) {
+    pub fn lerp_equal_sides(from: &Path, to: &Path, t: f32, margin_of_error: f32) -> (bool, Path) {
         fn check_if_within_margin_of_error(
             from: Point2D<f32>,
             to: Point2D<f32>,
             margin_of_error: f32,
-            out: &mut LerpResult,
+            out: &mut bool,
         ) {
             if ((from.x - to.x).abs() > margin_of_error)
                 || ((from.y - to.y).abs() > margin_of_error)
             {
-                *out = LerpResult::OutsideMarginOfError;
+                *out = false;
             }
         }
 
         let count = from.iter().count();
         assert!(count == to.iter().count());
 
-        let mut all_within_margin_of_error = LerpResult::WithinMarginOfError;
+        let mut all_within_margin_of_error = true;
 
         let parts =
             from.iter()
@@ -304,15 +315,10 @@ mod path_lerping {
 
         let mut builder = Builder::with_capacity(count * 2 - 1, count);
         builder.concatenate(&[Path::from_iter(parts).as_slice()]);
-        (builder.build(), all_within_margin_of_error)
+        (all_within_margin_of_error, builder.build())
     }
 
-    pub fn lerp_less_sides(
-        from: &Path,
-        to: &Path,
-        t: f32,
-        margin_of_error: f32,
-    ) -> (Path, LerpResult) {
+    pub fn lerp_less_sides(from: &Path, to: &Path, t: f32, margin_of_error: f32) -> (bool, Path) {
         let from_count = from.iter().count();
         let to_count = to.iter().count();
         assert!(from_count < to_count);
@@ -345,7 +351,7 @@ mod path_lerping {
         to: &Path,
         t: f32,
         margin_of_error: f32,
-    ) -> (Path, LerpResult) {
+    ) -> (bool, Path) {
         let from_count = from.iter().count();
         let to_count = to.iter().count();
         assert!(from_count > to_count);
@@ -362,8 +368,9 @@ mod path_lerping {
         let mut builder = Builder::with_capacity(from_count * 2 - 1, from_count);
         builder.concatenate(&[Path::from_iter(parts).as_slice()]);
 
-        let (mut lerped, result) = lerp_equal_sides(from, &builder.build(), t, margin_of_error);
-        if let LerpResult::WithinMarginOfError = result {
+        let (is_within_margin_of_error, mut lerped) =
+            lerp_equal_sides(from, &builder.build(), t, margin_of_error);
+        if is_within_margin_of_error {
             let remove_index = from_count / 2;
 
             let parts = lerped
@@ -375,6 +382,6 @@ mod path_lerping {
             builder.concatenate(&[Path::from_iter(parts).as_slice()]);
             lerped = builder.build();
         }
-        (lerped, result)
+        (is_within_margin_of_error, lerped)
     }
 }
