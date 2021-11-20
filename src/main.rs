@@ -118,7 +118,7 @@ fn setup(mut commands: Commands) {
         })
         .insert(LerpingShape {
             target: ShapePath::build_as(&shape).0,
-            lerp_t: 0.1,
+            lerp_t: 0.025,
             margin_of_error: 1.0,
         });
 }
@@ -138,12 +138,23 @@ fn update_lerp_target<T: RangeBounds<u8> + 'static + Send + Sync>(
     mut query: Query<(&SidesChangingShape<T>, &mut LerpingShape), Changed<SidesChangingShape<T>>>,
 ) {
     for (sides, mut shape) in query.iter_mut() {
-        shape.target = ShapePath::build_as(&shapes::RegularPolygon {
-            sides: sides.sides as usize,
-            feature: shapes::RegularPolygonFeature::Radius(200.0),
-            ..Default::default()
-        })
-        .0;
+        if sides.sides % 2 == 0 {
+            shape.target = ShapePath::build_as(&shapes::Ellipse {
+                radii: Vec2::new(
+                    (sides.sides as u32 * 50) as f32,
+                    (sides.sides as u32 * 25) as f32,
+                ),
+                ..Default::default()
+            })
+            .0;
+        } else {
+            shape.target = ShapePath::build_as(&shapes::RegularPolygon {
+                sides: sides.sides as usize,
+                feature: shapes::RegularPolygonFeature::Radius(200.0),
+                ..Default::default()
+            })
+            .0;
+        }
     }
 }
 
