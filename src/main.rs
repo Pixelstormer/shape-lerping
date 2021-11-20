@@ -141,8 +141,8 @@ fn update_lerp_target<T: RangeBounds<u8> + 'static + Send + Sync>(
         if sides.sides % 2 == 0 {
             shape.target = ShapePath::build_as(&shapes::Ellipse {
                 radii: Vec2::new(
-                    (sides.sides as u32 * 50) as f32,
-                    (sides.sides as u32 * 25) as f32,
+                    (sides.sides as f32).sin() * 200.0,
+                    (sides.sides as f32).cos() * 200.0,
                 ),
                 ..Default::default()
             })
