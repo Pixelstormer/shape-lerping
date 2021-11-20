@@ -9,7 +9,6 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 bevy = "0.5"
 bevy_prototype_lyon = { git = "https://github.com/Nilirad/bevy_prototype_lyon" }
-lerp = "0.4"
 
 [patch.crates-io]
-bevy = { git = "https://github.com/bevyengine/bevy", branch = "main" }
+bevy = { git = "https://github.com/bevyengine/bevy" }

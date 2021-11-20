@@ -1,18 +1,11 @@
 mod path_lerping;
 
+use crate::path_lerping::Lerp;
 use bevy::prelude::*;
 use bevy_prototype_lyon::entity::Path as PathComponent;
 use bevy_prototype_lyon::prelude::*;
-use lerp::{num_traits::Float, Lerp};
-use std::{
-    cmp::Ordering,
-    iter::{self, FromIterator},
-    ops::{Add, Mul, RangeBounds, RangeInclusive, Sub},
-};
-use tess::{
-    geom::euclid::default::Point2D,
-    path::{path::Builder, Event, Path},
-};
+use std::ops::{Add, RangeBounds, RangeInclusive, Sub};
+use tess::path::Path;
 
 enum Direction {
     Increasing,
@@ -159,7 +152,7 @@ fn lerp_shape(
     mut query: Query<(Entity, &mut PathComponent, &LerpingShape)>,
 ) {
     for (entity, mut from, to) in query.iter_mut() {
-        let (new_path, is_within_margin_of_error) =
+        let (is_within_margin_of_error, new_path) =
             from.0.lerped(&to.target, to.lerp_t, to.margin_of_error);
         from.0 = new_path;
         if is_within_margin_of_error {
@@ -167,39 +160,3 @@ fn lerp_shape(
         }
     }
 }
-
-trait WithinMarginOfError<T, M> {
-    fn is_within_margin_of_error(&self, target: &T, margin_of_error: &M) -> bool;
-}
-
-impl<S, T, M: PartialOrd<S> + PartialOrd<T>> WithinMarginOfError<T, M> for S {
-    fn is_within_margin_of_error(&self, target: &T, margin_of_error: &M) -> bool {
-        margin_of_error.partial_cmp(self) == margin_of_error.partial_cmp(target)
-    }
-}
-
-//trait Lerpable<T = f32, M = f32>: Lerp<T> {
-//    fn lerped(&self, target: &Self, t: &T, margin_of_error: &M) -> (bool, Self);
-//}
-//
-//impl<S: WithinMarginOfError<S, M> + Add<Output = S> + Mul<T, Output = S>, T: Float, M>
-//    Lerpable<T, M> for S
-//{
-//    fn lerped(&self, target: &Self, t: &T, margin_of_error: &M) -> (bool, Self) {
-//        let result = self.lerp(*target, *t);
-//        (
-//            result.is_within_margin_of_error(target, margin_of_error),
-//            result,
-//        )
-//    }
-//}
-
-//impl Lerpable for Path {
-//    fn lerped(&self, target: &Self, t: f32, margin_of_error: f32) -> (Self, bool) {
-//        match self.iter().count().cmp(&target.iter().count()) {
-//            Ordering::Equal => path_lerping::lerp_equal_sides(self, target, t, margin_of_error),
-//            Ordering::Less => path_lerping::lerp_less_sides(self, target, t, margin_of_error),
-//            Ordering::Greater => path_lerping::lerp_greater_sides(self, target, t, margin_of_error),
-//        }
-//    }
-//}

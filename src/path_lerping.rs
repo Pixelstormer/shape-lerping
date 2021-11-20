@@ -1,211 +1,290 @@
 use bevy_prototype_lyon::prelude::*;
-//use lerp::Lerp;
 use std::{
-    iter,
-    ops::{Add, Mul, Sub},
+    cmp::Ordering,
+    iter::{self, FromIterator},
 };
 use tess::{
-    geom::{
-        euclid::{default::Point2D, num::One},
-        traits::Transformation,
-        Vector,
-    },
-    path::{path::Builder, Event, Path},
+    math::Point,
+    path::{Event, Path, PathEvent},
 };
 
-pub struct Lerp2D<T> {
-    pub x: T,
-    pub y: T,
-    pub t: T,
+pub trait Lerp<T = Self, U = Self> {
+    fn lerped(self, other: T, t: f32, p: f32) -> (bool, U);
 }
 
-impl<T> Transformation<T> for Lerp2D<T>
-where
-    T: Copy + One + Sub<Output = T> + Add<Output = T> + Mul<Output = T>,
-{
-    fn transform_point(&self, p: Point2D<T>) -> Point2D<T> {
-        p.lerp((self.x, self.y).into(), self.t)
-    }
-
-    fn transform_vector(&self, v: Vector<T>) -> Vector<T> {
-        v.lerp((self.x, self.y).into(), self.t)
-    }
-}
-
-pub struct PathLerp {}
-
-pub fn lerp_equal_sides(from: &Path, to: &Path, t: f32, margin_of_error: f32) -> (bool, Path) {
-    fn check_if_within_margin_of_error(
-        from: Point2D<f32>,
-        to: Point2D<f32>,
-        margin_of_error: f32,
-        out: &mut bool,
-    ) {
-        if ((from.x - to.x).abs() > margin_of_error) || ((from.y - to.y).abs() > margin_of_error) {
-            *out = false;
+impl Lerp for Point {
+    fn lerped(self, other: Self, t: f32, p: f32) -> (bool, Self) {
+        let result = self.lerp(other, t);
+        if result.distance_to(other) > p {
+            (false, result)
+        } else {
+            (true, other)
         }
     }
-
-    from.transformed(PathLerp::from(to));
-
-    let count = from.iter().count();
-    assert!(count == to.iter().count());
-
-    let mut all_within_margin_of_error = true;
-
-    let parts =
-        from.iter()
-            .zip(to.iter())
-            .map(|(from_event, to_event)| match (from_event, to_event) {
-                (Event::Begin { at: from_at }, Event::Begin { at: to_at }) => {
-                    let at = Point2D::new(
-                        Lerp::lerp(from_at.x, to_at.x, t),
-                        Lerp::lerp(from_at.y, to_at.y, t),
-                    );
-                    check_if_within_margin_of_error(
-                        at,
-                        to_at,
-                        margin_of_error,
-                        &mut all_within_margin_of_error,
-                    );
-                    Event::Begin { at }
-                }
-                (
-                    Event::Line {
-                        from: from_from,
-                        to: from_to,
-                    },
-                    Event::Line {
-                        from: to_from,
-                        to: to_to,
-                    },
-                ) => {
-                    let from = Point2D::new(
-                        Lerp::lerp(from_from.x, to_from.x, t),
-                        Lerp::lerp(from_from.y, to_from.y, t),
-                    );
-                    let to = Point2D::new(
-                        Lerp::lerp(from_to.x, to_to.x, t),
-                        Lerp::lerp(from_to.y, to_to.y, t),
-                    );
-                    check_if_within_margin_of_error(
-                        from,
-                        to_from,
-                        margin_of_error,
-                        &mut all_within_margin_of_error,
-                    );
-                    check_if_within_margin_of_error(
-                        to,
-                        to_to,
-                        margin_of_error,
-                        &mut all_within_margin_of_error,
-                    );
-                    Event::Line { from, to }
-                }
-                (
-                    Event::End {
-                        last: from_last,
-                        first: from_first,
-                        ..
-                    },
-                    Event::End {
-                        last: to_last,
-                        first: to_first,
-                        ..
-                    },
-                ) => {
-                    let last = Point2D::new(
-                        Lerp::lerp(from_last.x, to_last.x, t),
-                        Lerp::lerp(from_last.y, to_last.y, t),
-                    );
-                    let first = Point2D::new(
-                        Lerp::lerp(from_first.x, to_first.x, t),
-                        Lerp::lerp(from_first.y, to_first.y, t),
-                    );
-                    check_if_within_margin_of_error(
-                        last,
-                        to_last,
-                        margin_of_error,
-                        &mut all_within_margin_of_error,
-                    );
-                    check_if_within_margin_of_error(
-                        first,
-                        to_first,
-                        margin_of_error,
-                        &mut all_within_margin_of_error,
-                    );
-                    Event::End {
-                        last,
-                        first,
-                        close: true,
-                    }
-                }
-                _ => unreachable!(),
-            });
-
-    let mut builder = Builder::with_capacity(count * 2 - 1, count);
-    builder.concatenate(&[parts.collect::<Path>().as_slice()]);
-    (all_within_margin_of_error, builder.build())
 }
 
-pub fn lerp_less_sides(from: &Path, to: &Path, t: f32, margin_of_error: f32) -> (bool, Path) {
+impl Lerp for PathEvent {
+    fn lerped(self, mut other: Self, t: f32, p: f32) -> (bool, Self) {
+        fn lerp_other(
+            from_from: Point,
+            from_to: Point,
+            from_ctrl: Point,
+            from_ctrl2: Point,
+            other: PathEvent,
+            t: f32,
+            p: f32,
+        ) -> (bool, PathEvent) {
+            match other {
+                Event::Begin { at } => {
+                    let (snapped, at) = from_from.lerped(at, t, p);
+                    (snapped, Event::Begin { at })
+                }
+                Event::Line { from, to } => {
+                    let (from_snapped, from) = from_from.lerped(from, t, p);
+                    let (to_snapped, to) = from_to.lerped(to, t, p);
+                    (from_snapped && to_snapped, Event::Line { from, to })
+                }
+                Event::Quadratic { from, ctrl, to } => {
+                    let (from_snapped, from) = from_from.lerped(from, t, p);
+                    let (ctrl_snapped, ctrl) = from_ctrl.lerped(ctrl, t, p);
+                    let (to_snapped, to) = from_to.lerped(to, t, p);
+                    (
+                        from_snapped && ctrl_snapped && to_snapped,
+                        Event::Quadratic { from, ctrl, to },
+                    )
+                }
+                Event::Cubic {
+                    from,
+                    ctrl1,
+                    ctrl2,
+                    to,
+                } => {
+                    let (from_snapped, from) = from_from.lerped(from, t, p);
+                    let (ctrl1_snapped, ctrl1) = from_ctrl.lerped(ctrl1, t, p);
+                    let (ctrl2_snapped, ctrl2) = from_ctrl2.lerped(ctrl2, t, p);
+                    let (to_snapped, to) = from_to.lerped(to, t, p);
+                    (
+                        from_snapped && ctrl1_snapped && ctrl2_snapped && to_snapped,
+                        Event::Cubic {
+                            from,
+                            ctrl1,
+                            ctrl2,
+                            to,
+                        },
+                    )
+                }
+                Event::End {
+                    last,
+                    first,
+                    close: _,
+                } => {
+                    let (last_snapped, last) = from_from.lerped(last, t, p);
+                    let (first_snapped, first) = from_to.lerped(first, t, p);
+                    (
+                        last_snapped && first_snapped,
+                        Event::End {
+                            last,
+                            first,
+                            close: true,
+                        },
+                    )
+                }
+            }
+        }
+
+        match self {
+            Event::Begin { at } => lerp_other(at, at, at, at, other, t, p),
+            Event::Line { from, to } => match other {
+                Event::Begin { at } => {
+                    let (from_snapped, from) = from.lerped(at, t, p);
+                    let (to_snapped, to) = to.lerped(at, t, p);
+                    (from_snapped && to_snapped, Event::Line { from, to })
+                }
+                _ => {
+                    let midpoint = from.lerp(to, 0.5);
+                    lerp_other(from, to, midpoint, midpoint, other, t, p)
+                }
+            },
+            Event::Quadratic { from, ctrl, to } => match other {
+                Event::Begin { at } => {
+                    let (from_snapped, from) = from.lerped(at, t, p);
+                    let (ctrl_snapped, ctrl) = ctrl.lerped(at, t, p);
+                    let (to_snapped, to) = to.lerped(at, t, p);
+                    (
+                        from_snapped && ctrl_snapped && to_snapped,
+                        Event::Quadratic { from, ctrl, to },
+                    )
+                }
+                Event::Line {
+                    from: other_from,
+                    to: other_to,
+                }
+                | Event::End {
+                    last: other_from,
+                    first: other_to,
+                    close: _,
+                } => {
+                    let (from_snapped, from) = from.lerped(other_from, t, p);
+                    let (ctrl_snapped, ctrl) = ctrl.lerped(other_from.lerp(other_to, 0.5), t, p);
+                    let (to_snapped, to) = to.lerped(other_to, t, p);
+                    let all_snapped = from_snapped && ctrl_snapped && to_snapped;
+                    if !all_snapped {
+                        other = Event::Quadratic { from, ctrl, to };
+                    }
+                    (all_snapped, other)
+                }
+                _ => lerp_other(from, to, ctrl, ctrl, other, t, p),
+            },
+            Event::Cubic {
+                from,
+                ctrl1,
+                ctrl2,
+                to,
+            } => match other {
+                Event::Begin { at } => {
+                    let (from_snapped, from) = from.lerped(at, t, p);
+                    let (ctrl1_snapped, ctrl1) = ctrl1.lerped(at, t, p);
+                    let (ctrl2_snapped, ctrl2) = ctrl2.lerped(at, t, p);
+                    let (to_snapped, to) = to.lerped(at, t, p);
+                    (
+                        from_snapped && ctrl1_snapped && ctrl2_snapped && to_snapped,
+                        Event::Cubic {
+                            from,
+                            ctrl1,
+                            ctrl2,
+                            to,
+                        },
+                    )
+                }
+                Event::Line {
+                    from: other_from,
+                    to: other_to,
+                }
+                | Event::End {
+                    last: other_from,
+                    first: other_to,
+                    close: _,
+                } => {
+                    let (from_snapped, from) = from.lerped(other_from, t, p);
+                    let midpoint = other_from.lerp(other_to, 0.5);
+                    let (ctrl1_snapped, ctrl1) = ctrl1.lerped(midpoint, t, p);
+                    let (ctrl2_snapped, ctrl2) = ctrl2.lerped(midpoint, t, p);
+                    let (to_snapped, to) = to.lerped(other_to, t, p);
+                    let all_snapped = from_snapped && ctrl1_snapped && ctrl2_snapped && to_snapped;
+                    if !all_snapped {
+                        other = Event::Cubic {
+                            from,
+                            ctrl1,
+                            ctrl2,
+                            to,
+                        };
+                    }
+                    (all_snapped, other)
+                }
+                Event::Quadratic {
+                    from: other_from,
+                    ctrl,
+                    to: other_to,
+                } => {
+                    let (from_snapped, from) = from.lerped(other_from, t, p);
+                    let (ctrl1_snapped, ctrl1) = ctrl1.lerped(ctrl, t, p);
+                    let (ctrl2_snapped, ctrl2) = ctrl2.lerped(ctrl, t, p);
+                    let (to_snapped, to) = to.lerped(other_to, t, p);
+                    let all_snapped = from_snapped && ctrl1_snapped && ctrl2_snapped && to_snapped;
+                    if !all_snapped {
+                        other = Event::Cubic {
+                            from,
+                            ctrl1,
+                            ctrl2,
+                            to,
+                        };
+                    }
+                    (all_snapped, other)
+                }
+                _ => lerp_other(from, to, ctrl1, ctrl2, other, t, p),
+            },
+            Event::End { last, first, close } => match other {
+                Event::Begin { at } => {
+                    let (last_snapped, last) = last.lerped(at, t, p);
+                    let (first_snapped, first) = first.lerped(at, t, p);
+                    (
+                        last_snapped && first_snapped,
+                        Event::End { last, first, close },
+                    )
+                }
+                _ => {
+                    let midpoint = last.lerp(first, 0.5);
+                    lerp_other(last, first, midpoint, midpoint, other, t, p)
+                }
+            },
+        }
+    }
+}
+
+impl Lerp<Self, Path> for &Path {
+    fn lerped(self, other: Self, t: f32, p: f32) -> (bool, Path) {
+        match self.iter().count().cmp(&other.iter().count()) {
+            Ordering::Equal => lerp_equal_sides(self, other, t, p),
+            Ordering::Less => lerp_less_sides(self, other, t, p),
+            Ordering::Greater => lerp_greater_sides(self, other, t, p),
+        }
+    }
+}
+
+fn lerp_equal_sides<T, U>(from: T, to: U, t: f32, p: f32) -> (bool, Path)
+where
+    T: IntoIterator,
+    U: IntoIterator,
+    T::Item: Lerp<U::Item>,
+    Path: FromIterator<T::Item>,
+{
+    let mut all_snapped = true;
+    let result = from
+        .into_iter()
+        .zip(to)
+        .map(|(from, to)| from.lerped(to, t, p))
+        .inspect(|(snapped, _)| all_snapped &= snapped)
+        .map(|(_, event)| event)
+        .collect::<Path>();
+    (all_snapped, result)
+}
+
+fn lerp_less_sides(from: &Path, to: &Path, t: f32, p: f32) -> (bool, Path) {
     let from_count = from.iter().count();
     let to_count = to.iter().count();
     assert!(from_count < to_count);
-
-    let insert_index = from_count / 2;
-    if let Event::Line { to: duplicated, .. } = from.iter().nth(insert_index).unwrap() {
-        let diff = to_count - from_count;
-        let parts = from
-            .iter()
-            .take(insert_index)
-            .chain(
-                iter::repeat(Event::Line {
-                    from: duplicated,
-                    to: duplicated,
-                })
-                .take(diff),
-            )
-            .chain(from.iter().skip(insert_index));
-
-        let mut builder = Builder::with_capacity(to_count * 2 - 1, to_count);
-        builder.concatenate(&[parts.collect::<Path>().as_slice()]);
-        lerp_equal_sides(&builder.build(), to, t, margin_of_error)
-    } else {
-        unreachable!()
-    }
+    lerp_equal_sides(
+        iter::repeat(
+            from.iter()
+                .next()
+                .unwrap_or_else(|| to.iter().next().unwrap()),
+        )
+        .take(to_count - from_count)
+        .chain(from),
+        to,
+        t,
+        p,
+    )
 }
 
-pub fn lerp_greater_sides(from: &Path, to: &Path, t: f32, margin_of_error: f32) -> (bool, Path) {
+fn lerp_greater_sides(from: &Path, to: &Path, t: f32, p: f32) -> (bool, Path) {
     let from_count = from.iter().count();
     let to_count = to.iter().count();
     assert!(from_count > to_count);
-
-    let diff = from_count - to_count;
-    let insert_index = to_count / 2;
-    let duplicated = to.iter().nth(insert_index).unwrap();
-    let parts = to
-        .iter()
-        .take(insert_index)
-        .chain(iter::repeat(duplicated).take(diff))
-        .chain(to.iter().skip(insert_index));
-
-    let mut builder = Builder::with_capacity(from_count * 2 - 1, from_count);
-    builder.concatenate(&[parts.collect::<Path>().as_slice()]);
-
-    let (is_within_margin_of_error, mut lerped) =
-        lerp_equal_sides(from, &builder.build(), t, margin_of_error);
-    if is_within_margin_of_error {
-        let remove_index = from_count / 2;
-
-        let parts = lerped
-            .iter()
-            .take(remove_index)
-            .chain(lerped.iter().skip(remove_index + diff));
-
-        let mut builder = Builder::with_capacity(to_count * 2 - 1, to_count);
-        builder.concatenate(&[parts.collect::<Path>().as_slice()]);
-        lerped = builder.build();
+    let (all_snapped, mut result) = lerp_equal_sides(
+        from,
+        iter::repeat(
+            to.iter()
+                .next()
+                .unwrap_or_else(|| from.iter().next().unwrap()),
+        )
+        .take(from_count - to_count)
+        .chain(to),
+        t,
+        p,
+    );
+    if all_snapped {
+        result = to.clone();
     }
-    (is_within_margin_of_error, lerped)
+    (all_snapped, result)
 }
