@@ -14,12 +14,12 @@ pub trait Lerp<T = Self, U = Self> {
 
 impl Lerp for Point {
     fn lerped(self, other: Self, t: f32, p: f32) -> (bool, Self) {
-        let result = self.lerp(other, t);
-        if result.distance_to(other) > p {
-            (false, result)
-        } else {
-            (true, other)
+        let mut result = self.lerp(other, t);
+        let snapped = result.distance_to(other) <= p;
+        if snapped {
+            result = other;
         }
+        (snapped, result)
     }
 }
 
